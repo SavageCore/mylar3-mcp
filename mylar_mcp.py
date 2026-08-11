@@ -55,10 +55,17 @@ def build_client(
 
 
 def _unwrap(r: httpx.Response) -> Any:
-    """Normalise a Mylar response body into just the meaningful payload."""
+    """Normalise a Mylar response body into just the meaningful payload.
+
+    Some commands (restart, shutdown, several void mutations) answer a 2xx with
+    an empty or plain-text body rather than JSON. Treat those as success instead
+    of failing, so tools like ``mylar_restart`` don't error out mid-restart.
+    """
     try:
         j = r.json()
     except ValueError:
+        if r.status_code < 400:
+            return {"message": r.text.strip() or f"OK (HTTP {r.status_code})"}
         raise ToolError(f"Mylar API {r.status_code}: non-JSON response")
 
     if isinstance(j, dict) and "success" in j:

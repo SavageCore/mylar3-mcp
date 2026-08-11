@@ -358,10 +358,16 @@ async def test_non_json_error_body_does_not_crash(server, recorder):
         await call(server, "mylar_get_index")
 
 
-async def test_non_json_success_body_raises(server, recorder):
+async def test_non_json_success_body_is_tolerated(server, recorder):
     recorder.response = httpx.Response(200, text="not json")
-    with pytest.raises(ToolError, match="non-JSON"):
-        await call(server, "mylar_get_index")
+    result = await call(server, "mylar_get_index")
+    assert result.data == {"message": "not json"}
+
+
+async def test_non_json_empty_success_body_is_tolerated(server, recorder):
+    recorder.response = httpx.Response(200, text="")
+    result = await call(server, "mylar_get_index")
+    assert result.data == {"message": "OK (HTTP 200)"}
 
 
 # --- main() --------------------------------------------------------------------
