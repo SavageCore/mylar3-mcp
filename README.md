@@ -1,5 +1,6 @@
 # mylar3-mcp
 
+Part of the [arr-mcps](https://github.com/SavageCore/arr-mcps) collection.
 MCP server exposing [Mylar3](https://github.com/MylarComics/mylar3)'s HTTP API
 as tools, so an LLM can read and manage your comic library: watchlist, wanted
 issues, pull-list/upcoming, history, logs, story arcs, and providers.
