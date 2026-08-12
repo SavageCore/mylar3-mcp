@@ -1,5 +1,12 @@
 """MCP server exposing Mylar3's HTTP API (https://github.com/MylarComics/mylar3) as tools.
 
+Full API coverage, exposed as 5 resource-scoped *portmanteau* tools instead
+of one tool per command. Each portmanteau tool (e.g. mylar_comics,
+mylar_system) takes an `operation` enum plus an `arguments` dict; see
+AGENTS.md for the rationale. `_GROUPS` near the bottom buckets every command
+function by resource and `_register_group` wraps each bucket in one
+dispatching MCP tool; the functions themselves are not tools anymore.
+
 Mylar3 is CherryPy-based and dispatches everything through a single ``?cmd=``
 endpoint rooted at ``<base_url><http_root>/api``. Auth is a 32-char API key
 passed as the ``apikey`` query (or form) parameter -- the only auth mode the
@@ -16,14 +23,16 @@ Design notes vs. Dashy's MCP server:
   and are deliberately excluded -- an LLM should not tunnel binary over MCP.
 """
 
+import inspect
 import os
 import sys
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlencode
 
 import httpx
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
+from fastmcp.tools import Tool
 from mcp.types import ToolAnnotations
 
 DESTRUCTIVE = ToolAnnotations(destructiveHint=True)
@@ -47,7 +56,10 @@ _WEB_PASSWORD: str | None = None
 
 
 def build_client(
-    base_url: str, api_key: str | None, http_root: str = "/", transport: httpx.BaseTransport | None = None
+    base_url: str,
+    api_key: str | None,
+    http_root: str = "/",
+    transport: httpx.BaseTransport | None = None,
 ) -> httpx.AsyncClient:
     """Build an httpx client rooted at the Mylar API.
 
@@ -55,7 +67,9 @@ def build_client(
     so no default header is set here -- the base URL just carries the /api path.
     """
     root = http_root if http_root.startswith("/") else f"/{http_root}"
-    return httpx.AsyncClient(base_url=f"{base_url.rstrip('/')}{root.rstrip('/')}/api", transport=transport)
+    return httpx.AsyncClient(
+        base_url=f"{base_url.rstrip('/')}{root.rstrip('/')}/api", transport=transport
+    )
 
 
 def _unwrap(r: httpx.Response) -> Any:
@@ -102,7 +116,9 @@ def _obj(value: Any) -> JSONObj:
     return {"data": value}
 
 
-async def _req(cmd: str, params: dict[str, Any] | None = None, *, read_only: bool = True) -> Any:
+async def _req(
+    cmd: str, params: dict[str, Any] | None = None, *, read_only: bool = True
+) -> Any:
     assert _client is not None, "client not configured"
     body = {"cmd": cmd, **(params or {})}
     if _API_KEY:
@@ -112,7 +128,12 @@ async def _req(cmd: str, params: dict[str, Any] | None = None, *, read_only: boo
     if method == "GET":
         r = await _client.request(method, "", params=body)
     else:
-        r = await _client.request(method, "", content=urlencode(body), headers={"Content-Type": "application/x-www-form-urlencoded"})
+        r = await _client.request(
+            method,
+            "",
+            content=urlencode(body),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
 
     if r.status_code >= 400:
         try:
@@ -176,41 +197,34 @@ async def _web_config_update(values: dict[str, Any]) -> dict[str, Any]:
     return {"message": "config updated", "status": r.status_code}
 
 
-
 # --- read-only tools ---------------------------------------------------------
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_get_index() -> JSONVal:
     """List every series on the Mylar3 watchlist (id, name, status, publisher, etc.)."""
     return await _req("getIndex")
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_get_comic(id: str) -> JSONObj:
     """Get one series and its issues: returns {comic, issues, annuals}. `id` is the ComicVine ComicID."""
     return _obj(await _req("getComic", {"id": id}))
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_get_comic_info(id: str) -> JSONObj:
     """Get a single series row from the comics table. `id` is the ComicVine ComicID."""
     return _obj(await _req("getComicInfo", {"id": id}))
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_get_issue_info(id: str) -> JSONObj:
     """Get a single issue row from the issues table. `id` is the IssueID."""
     return _obj(await _req("getIssueInfo", {"id": id}))
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_get_read_list() -> JSONVal:
     """List the issues in the read list, ordered by issue date."""
     return await _req("getReadList")
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_get_upcoming(include_downloaded_issues: str | None = None) -> JSONVal:
     """List this week's wanted issues. Pass include_downloaded_issues='Y' to also include Snatched/Downloaded."""
     params = {}
@@ -219,7 +233,6 @@ async def mylar_get_upcoming(include_downloaded_issues: str | None = None) -> JS
     return await _req("getUpcoming", params)
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_get_wanted(story_arcs: str | None = None) -> JSONVal:
     """List wanted issues. Pass story_arcs='true' to also include Wanted story-arc issues and annuals."""
     params = {}
@@ -228,19 +241,16 @@ async def mylar_get_wanted(story_arcs: str | None = None) -> JSONVal:
     return await _req("getWanted", params)
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_get_history() -> JSONVal:
     """List rows from the snatched table (download history), newest first."""
     return await _req("getHistory")
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_get_logs() -> JSONVal:
     """Return Mylar3's in-memory log buffer."""
     return await _req("getLogs")
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_find_comic(
     name: str,
     issue: str | None = None,
@@ -267,8 +277,9 @@ async def mylar_find_comic(
     return await _req("findComic", params)
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def mylar_get_story_arc(id: str | None = None, customOnly: str | None = None) -> JSONVal:
+async def mylar_get_story_arc(
+    id: str | None = None, customOnly: str | None = None
+) -> JSONVal:
     """List story arcs; with `id`, list that arc's issues in reading order. Pass customOnly='1' for custom arcs only."""
     params = {}
     if id:
@@ -278,19 +289,16 @@ async def mylar_get_story_arc(id: str | None = None, customOnly: str | None = No
     return await _req("getStoryArc", params)
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_get_version() -> JSONObj:
     """Get Mylar3 version info: git_path, install_type, current_version, latest_version, commits_behind."""
     return await _req("getVersion")
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_list_providers() -> JSONObj:
     """List configured newznab/torznab providers: returns {newznabs: [...], torznabs: [...]}."""
     return await _req("listProviders")
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_seriesjson_listing(missing: str | None = None) -> JSONVal:
     """List series with/without series.json. Pass missing='1' for only series missing a series.json."""
     params = {}
@@ -299,9 +307,10 @@ async def mylar_seriesjson_listing(missing: str | None = None) -> JSONVal:
     return await _req("seriesjsonListing", params)
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_list_annual_series(
-    list_issues: str | None = None, group_series: str | None = None, show_downloaded: str | None = None
+    list_issues: str | None = None,
+    group_series: str | None = None,
+    show_downloaded: str | None = None,
 ) -> JSONVal:
     """List annual issues. Provide list_issues OR group_series; pass show_downloaded to include downloaded."""
     params: dict[str, Any] = {}
@@ -314,7 +323,6 @@ async def mylar_list_annual_series(
     return await _req("listAnnualSeries", params)
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_get_api(username: str, password: str) -> JSONObj:
     """Bootstrap helper: fetch the API key using HTTP basic login credentials. Does not require MYLAR_API_KEY."""
     return await _req("getAPI", {"username": username, "password": password})
@@ -323,62 +331,60 @@ async def mylar_get_api(username: str, password: str) -> JSONObj:
 # --- mutating tools (recoverable) -------------------------------------------
 
 
-@mcp.tool
 async def mylar_add_comic(id: str) -> JSONObj:
     """Queue adding a series to the watchlist by ComicVine ComicID. Runs in a background thread."""
     return await _req("addComic", {"id": id}, read_only=False)
 
 
-@mcp.tool
 async def mylar_pause_comic(id: str) -> JSONObj:
     """Pause a series' wanted tracking. `id` is the ComicVine ComicID."""
     return await _req("pauseComic", {"id": id}, read_only=False)
 
 
-@mcp.tool
 async def mylar_resume_comic(id: str) -> JSONObj:
     """Resume a paused series. `id` is the ComicVine ComicID."""
     return await _req("resumeComic", {"id": id}, read_only=False)
 
 
-@mcp.tool
 async def mylar_refresh_comic(id: str) -> JSONObj:
     """Queue a ComicVine refresh of a series. `id` accepts a single id or comma-separated list."""
     return await _req("refreshComic", {"id": id}, read_only=False)
 
 
-@mcp.tool
 async def mylar_change_book_type(id: str, booktype: str) -> JSONObj:
     """Force a series' book type. `booktype`: Print, Digital, TPB, GN, HC, or One-Shot."""
-    return await _req("changeBookType", {"id": id, "booktype": booktype}, read_only=False)
+    return await _req(
+        "changeBookType", {"id": id, "booktype": booktype}, read_only=False
+    )
 
 
-@mcp.tool
 async def mylar_change_status(status_from: str, status_to: str, id: str) -> JSONObj:
     """Bulk-change issue status across a series. Pass id='all' for every series. status_from/status_to are issue statuses."""
-    return await _req("changeStatus", {"status_from": status_from, "status_to": status_to, "id": id}, read_only=False)
+    return await _req(
+        "changeStatus",
+        {"status_from": status_from, "status_to": status_to, "id": id},
+        read_only=False,
+    )
 
 
-@mcp.tool
 async def mylar_recheck_files(id: str) -> JSONObj:
     """Recheck files on disk for a series. `id` accepts a single id, comma-list, or a JSON array."""
     return await _req("recheckFiles", {"id": id}, read_only=False)
 
 
-@mcp.tool
 async def mylar_queue_issue(id: str) -> JSONObj:
     """Mark an issue Wanted and immediately kick off a search (may snatch/download). `id` is the IssueID."""
     return await _req("queueIssue", {"id": id}, read_only=False)
 
 
-@mcp.tool
 async def mylar_unqueue_issue(id: str) -> JSONObj:
     """Mark an issue Skipped (un-queue it). `id` is the IssueID."""
     return await _req("unqueueIssue", {"id": id}, read_only=False)
 
 
-@mcp.tool
-async def mylar_regenerate_covers(id: str, overwrite_existing: str | None = None) -> JSONObj:
+async def mylar_regenerate_covers(
+    id: str, overwrite_existing: str | None = None
+) -> JSONObj:
     """Re-fetch series cover images. `id`: single, comma-list, 'all', or 'missing'."""
     params: dict[str, Any] = {"id": id}
     if overwrite_existing:
@@ -386,15 +392,16 @@ async def mylar_regenerate_covers(id: str, overwrite_existing: str | None = None
     return await _req("regenerateCovers", params, read_only=False)
 
 
-@mcp.tool
 async def mylar_refresh_seriesjson(comicid: str) -> JSONObj:
     """Regenerate series.json files. `comicid`: single, list, 'all', 'missing', or 'refresh-missing'."""
     return await _req("refreshSeriesjson", {"comicid": comicid}, read_only=False)
 
 
-@mcp.tool
 async def mylar_add_story_arc(
-    issues: str | None = None, arclist: str | None = None, id: str | None = None, storyarcname: str | None = None
+    issues: str | None = None,
+    arclist: str | None = None,
+    id: str | None = None,
+    storyarcname: str | None = None,
 ) -> JSONObj:
     """Add/create a story arc. Provide `issues` OR `arclist`. `storyarcname` required when creating; `id` to extend an existing arc."""
     params: dict[str, Any] = {}
@@ -409,13 +416,11 @@ async def mylar_add_story_arc(
     return await _req("addStoryArc", params, read_only=False)
 
 
-@mcp.tool
 async def mylar_force_search() -> JSONObj:
     """Trigger a wanted-issue search across the library. May snatch/download wanted issues. Runs in-process."""
     return await _req("forceSearch", read_only=False)
 
 
-@mcp.tool
 async def mylar_force_process(
     nzb_name: str,
     nzb_folder: str,
@@ -446,9 +451,14 @@ async def mylar_force_process(
     return await _req("forceProcess", params, read_only=False)
 
 
-@mcp.tool
 async def mylar_add_provider(
-    providertype: str, name: str, host: str, prov_apikey: str, enabled: str, categories: str | None = None, uid: str | None = None
+    providertype: str,
+    name: str,
+    host: str,
+    prov_apikey: str,
+    enabled: str,
+    categories: str | None = None,
+    uid: str | None = None,
 ) -> JSONObj:
     """Add a newznab or torznab provider. providertype is 'newznab' or 'torznab' (torznab requires categories)."""
     params: dict[str, Any] = {
@@ -465,7 +475,6 @@ async def mylar_add_provider(
     return await _req("addProvider", params, read_only=False)
 
 
-@mcp.tool
 async def mylar_change_provider(
     providertype: str,
     name: str | None = None,
@@ -498,25 +507,21 @@ async def mylar_change_provider(
     return await _req("changeProvider", params, read_only=False)
 
 
-@mcp.tool
 async def mylar_check_github() -> JSONObj:
     """Check GitHub for updates and return current version data."""
     return await _req("checkGithub", read_only=False)
 
 
-@mcp.tool
 async def mylar_update() -> JSONObj:
     """Trigger Mylar3 to self-update (may restart the app)."""
     return await _req("update", read_only=False)
 
 
-@mcp.tool
 async def mylar_restart() -> JSONObj:
     """Restart Mylar3."""
     return await _req("restart", read_only=False)
 
 
-@mcp.tool
 async def mylar_clear_logs() -> JSONObj:
     """Clear Mylar3's in-memory log buffer."""
     return await _req("clearLogs", read_only=False)
@@ -525,7 +530,6 @@ async def mylar_clear_logs() -> JSONObj:
 # --- config / destructive tools ---------------------------------------------
 
 
-@mcp.tool
 async def mylar_set_config(settings: dict[str, Any]) -> JSONObj:
     """Set one or more Mylar config options via the web configUpdate endpoint.
 
@@ -545,7 +549,6 @@ async def mylar_set_config(settings: dict[str, Any]) -> JSONObj:
     return await _web_config_update(values)
 
 
-@mcp.tool(annotations=DESTRUCTIVE)
 async def mylar_del_comic(id: str, directory: str | None = None) -> JSONObj:
     """Delete a series from the watchlist (and its issues). `id` is the ComicVine ComicID.
     WARNING: pass directory='true' to also delete the comic folder from disk (rmtree)."""
@@ -555,8 +558,9 @@ async def mylar_del_comic(id: str, directory: str | None = None) -> JSONObj:
     return await _req("delComic", params, read_only=False)
 
 
-@mcp.tool(annotations=DESTRUCTIVE)
-async def mylar_del_provider(providertype: str, name: str | None = None, prov_id: str | None = None) -> JSONObj:
+async def mylar_del_provider(
+    providertype: str, name: str | None = None, prov_id: str | None = None
+) -> JSONObj:
     """Remove a provider. Provide providertype and either `name` or `prov_id`."""
     params: dict[str, Any] = {"providertype": providertype}
     if name:
@@ -566,17 +570,145 @@ async def mylar_del_provider(providertype: str, name: str | None = None, prov_id
     return await _req("delProvider", params, read_only=False)
 
 
-@mcp.tool(annotations=DESTRUCTIVE)
 async def mylar_shutdown() -> JSONObj:
     """Shut down Mylar3. This stops the server."""
     return await _req("shutdown", read_only=False)
+
+
+# Resource groups for portmanteau registration. Every tool function name
+# must appear in exactly one group - see test_all_functions_grouped.
+_GROUPS: dict[str, tuple[str, ...]] = {
+    "mylar_comics": (
+        "mylar_add_comic",
+        "mylar_change_book_type",
+        "mylar_change_status",
+        "mylar_del_comic",
+        "mylar_find_comic",
+        "mylar_get_comic",
+        "mylar_get_comic_info",
+        "mylar_get_index",
+        "mylar_pause_comic",
+        "mylar_recheck_files",
+        "mylar_refresh_comic",
+        "mylar_resume_comic",
+    ),
+    "mylar_issues_queue": (
+        "mylar_force_process",
+        "mylar_force_search",
+        "mylar_get_issue_info",
+        "mylar_queue_issue",
+        "mylar_refresh_seriesjson",
+        "mylar_regenerate_covers",
+        "mylar_unqueue_issue",
+    ),
+    "mylar_lists_discovery": (
+        "mylar_add_story_arc",
+        "mylar_get_read_list",
+        "mylar_get_story_arc",
+        "mylar_get_upcoming",
+        "mylar_get_wanted",
+        "mylar_list_annual_series",
+        "mylar_seriesjson_listing",
+    ),
+    "mylar_providers": (
+        "mylar_add_provider",
+        "mylar_change_provider",
+        "mylar_del_provider",
+        "mylar_list_providers",
+    ),
+    "mylar_system": (
+        "mylar_check_github",
+        "mylar_clear_logs",
+        "mylar_get_api",
+        "mylar_get_history",
+        "mylar_get_logs",
+        "mylar_get_version",
+        "mylar_restart",
+        "mylar_set_config",
+        "mylar_shutdown",
+        "mylar_update",
+    ),
+}
+
+
+def _op_line(name: str, fn: Any) -> str:
+    """One line of a group tool's description: signature + one-line doc."""
+    sig = ", ".join(
+        p.name if p.default is inspect.Parameter.empty else f"{p.name}={p.default!r}"
+        for p in inspect.signature(fn).parameters.values()
+    )
+    return f"- {name}({sig}) — {' '.join((fn.__doc__ or '').split())}"
+
+
+def _register_group(
+    group: str, names: tuple[str, ...], ns: dict[str, Any], readonly_names: set[str]
+) -> None:
+    """Register one dispatching tool that fans out to every function named
+    in `names`. The functions themselves are untouched - they're just
+    looked up by name instead of each becoming its own tool."""
+    fns = {n: ns[n] for n in names}
+
+    async def dispatch(
+        operation: str, arguments: JSONObj | None = None
+    ) -> JSONVal | str:
+        fn = fns.get(operation)
+        if fn is None:
+            raise ToolError(
+                f"Unknown operation {operation!r} for {group}. Valid: {', '.join(fns)}"
+            )
+        return await fn(**(arguments or {}))
+
+    dispatch.__annotations__["operation"] = Literal[names]
+    ann = READONLY if set(names) <= readonly_names else None
+    mcp.add_tool(
+        Tool.from_function(
+            dispatch,
+            name=group,
+            description=(
+                f"{group.replace('_', ' ')} operations on Mylar3. Pass `operation` and an "
+                f"`arguments` dict matching that operation's parameters.\n\n"
+                + "\n".join(_op_line(n, f) for n, f in fns.items())
+            ),
+            annotations=ann,
+        )
+    )
+
+
+def _register_tools() -> None:
+    ns = globals()
+    readonly_names: set[str] = {
+        "mylar_find_comic",
+        "mylar_get_api",
+        "mylar_get_comic",
+        "mylar_get_comic_info",
+        "mylar_get_history",
+        "mylar_get_index",
+        "mylar_get_issue_info",
+        "mylar_get_logs",
+        "mylar_get_read_list",
+        "mylar_get_story_arc",
+        "mylar_get_upcoming",
+        "mylar_get_version",
+        "mylar_get_wanted",
+        "mylar_list_annual_series",
+        "mylar_list_providers",
+        "mylar_seriesjson_listing",
+    }
+    for group, names in _GROUPS.items():
+        _register_group(group, names, ns, readonly_names)
+
+
+_register_tools()
 
 
 def main() -> None:
     global _client, _API_KEY, _HTTP_ROOT, _WEB_USERNAME, _WEB_PASSWORD
     url = os.environ.get("MYLAR_URL")
     if not url:
-        print("MYLAR_URL environment variable is required (e.g. http://mylar.local:8090)", file=sys.stderr)
+        print(
+            "MYLAR_URL environment variable is required (e.g. http://mylar.local:8090)",
+            file=sys.stderr,
+        )
         raise SystemExit(1)
     _API_KEY = os.environ.get("MYLAR_API_KEY")
     _HTTP_ROOT = os.environ.get("MYLAR_HTTP_ROOT", "/")

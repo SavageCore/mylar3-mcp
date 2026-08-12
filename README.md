@@ -57,61 +57,67 @@ claude mcp add mylar3 \
 
 ## Tools
 
-One tool per Mylar3 `?cmd=` API command. Reads use GET, writes use POST.
+**5 resource-scoped tools**, each covering multiple Mylar3 `?cmd=` API
+commands (40 total) via an `operation` parameter. Reads use GET, writes use
+POST. Call a tool with `operation` set to one of its listed commands and an
+`arguments` dict matching that command's params — the tool's own description
+(visible to your MCP client) lists every operation, its signature, and a
+one-line doc.
 
-### Read-only
-
-| Tool | cmd | Required params |
+| Tool | Operations | Covers |
 |---|---|---|
-| `mylar_get_index` | getIndex | - |
-| `mylar_get_comic` | getComic | id |
-| `mylar_get_comic_info` | getComicInfo | id |
-| `mylar_get_issue_info` | getIssueInfo | id |
-| `mylar_get_read_list` | getReadList | - |
-| `mylar_get_upcoming` | getUpcoming | - |
-| `mylar_get_wanted` | getWanted | - |
-| `mylar_get_history` | getHistory | - |
-| `mylar_get_logs` | getLogs | - |
-| `mylar_find_comic` | findComic | name |
-| `mylar_get_story_arc` | getStoryArc | - |
-| `mylar_get_version` | getVersion | - |
-| `mylar_list_providers` | listProviders | - |
-| `mylar_seriesjson_listing` | seriesjsonListing | - |
-| `mylar_list_annual_series` | listAnnualSeries | list_issues or group_series |
-| `mylar_get_api` | getAPI | username, password |
+| `mylar_comics` | 12 | Add/get/pause/resume/refresh/delete comics, book type, status, recheck files, index, find |
+| `mylar_issues_queue` | 7 | Issue info, queue/unqueue, force search/process, regenerate covers, refresh seriesjson |
+| `mylar_lists_discovery` | 7 | Read list, upcoming, wanted, story arcs, seriesjson listing, annual series |
+| `mylar_providers` | 4 | List/add/change/delete providers |
+| `mylar_system` | 10 | Version, API, history, logs, config, GitHub check, update, restart, shutdown |
 
-### Library / watchlist (mutating)
+Example: `mylar_comics(operation="mylar_del_comic", arguments={"id": "12345", "directory": True})`.
+Command-level naming (`mylar_<verb>_<resource>`, matching the underlying
+`?cmd=` API command) is preserved as the `operation` value:
 
-| Tool | cmd | Required params |
-|---|---|---|
-| `mylar_add_comic` | addComic | id |
-| `mylar_pause_comic` | pauseComic | id |
-| `mylar_resume_comic` | resumeComic | id |
-| `mylar_refresh_comic` | refreshComic | id |
-| `mylar_change_book_type` | changeBookType | id, booktype |
-| `mylar_change_status` | changeStatus | status_from, status_to, id |
-| `mylar_recheck_files` | recheckFiles | id |
-| `mylar_queue_issue` | queueIssue | id |
-| `mylar_unqueue_issue` | unqueueIssue | id |
-| `mylar_regenerate_covers` | regenerateCovers | id |
-| `mylar_refresh_seriesjson` | refreshSeriesjson | comicid |
-| `mylar_add_story_arc` | addStoryArc | issues or arclist |
-| `mylar_force_search` | forceSearch | - |
-| `mylar_force_process` | forceProcess | nzb_name, nzb_folder |
-| `mylar_add_provider` | addProvider | providertype, name, host, prov_apikey, enabled |
-| `mylar_change_provider` | changeProvider | providertype, name or prov_id |
-| `mylar_check_github` | checkGithub | - |
-| `mylar_update` | update | - |
-| `mylar_restart` | restart | - |
-| `mylar_clear_logs` | clearLogs | - |
-
-### Destructive
-
-| Tool | cmd | Notes |
-|---|---|---|
-| `mylar_del_comic` | delComic | `directory=true` also deletes the folder from disk |
-| `mylar_del_provider` | delProvider | removes a provider |
-| `mylar_shutdown` | shutdown | stops the server |
+| Operation | cmd |
+|---|---|
+| `mylar_get_index` | getIndex |
+| `mylar_get_comic` | getComic |
+| `mylar_get_comic_info` | getComicInfo |
+| `mylar_get_issue_info` | getIssueInfo |
+| `mylar_get_read_list` | getReadList |
+| `mylar_get_upcoming` | getUpcoming |
+| `mylar_get_wanted` | getWanted |
+| `mylar_get_history` | getHistory |
+| `mylar_get_logs` | getLogs |
+| `mylar_find_comic` | findComic |
+| `mylar_get_story_arc` | getStoryArc |
+| `mylar_get_version` | getVersion |
+| `mylar_list_providers` | listProviders |
+| `mylar_seriesjson_listing` | seriesjsonListing |
+| `mylar_list_annual_series` | listAnnualSeries |
+| `mylar_get_api` | getAPI |
+| `mylar_add_comic` | addComic |
+| `mylar_pause_comic` | pauseComic |
+| `mylar_resume_comic` | resumeComic |
+| `mylar_refresh_comic` | refreshComic |
+| `mylar_change_book_type` | changeBookType |
+| `mylar_change_status` | changeStatus |
+| `mylar_recheck_files` | recheckFiles |
+| `mylar_queue_issue` | queueIssue |
+| `mylar_unqueue_issue` | unqueueIssue |
+| `mylar_regenerate_covers` | regenerateCovers |
+| `mylar_refresh_seriesjson` | refreshSeriesjson |
+| `mylar_add_story_arc` | addStoryArc |
+| `mylar_force_search` | forceSearch |
+| `mylar_force_process` | forceProcess |
+| `mylar_add_provider` | addProvider |
+| `mylar_change_provider` | changeProvider |
+| `mylar_check_github` | checkGithub |
+| `mylar_update` | update |
+| `mylar_restart` | restart |
+| `mylar_clear_logs` | clearLogs |
+| `mylar_del_comic` | delComic (`directory=true` also deletes the folder from disk) |
+| `mylar_del_provider` | delProvider |
+| `mylar_shutdown` | shutdown (stops the server) |
+| `mylar_set_config` | configUpdate (session-cookie auth, see AGENTS.md) |
 
 ## Notes
 
