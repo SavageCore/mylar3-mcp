@@ -40,6 +40,10 @@ mcp = FastMCP("mylar3-mcp")
 _client: httpx.AsyncClient | None = None
 _API_KEY: str | None = None
 _HTTP_ROOT = "/"
+_web_client: httpx.AsyncClient | None = None
+_web_transport: httpx.BaseTransport | None = None
+_WEB_USERNAME: str | None = None
+_WEB_PASSWORD: str | None = None
 
 
 def build_client(
@@ -108,6 +112,55 @@ async def _req(cmd: str, params: dict[str, Any] | None = None, *, read_only: boo
             msg = r.text
         raise ToolError(f"Mylar API {r.status_code}: {msg}")
     return _unwrap(r)
+
+
+async def _web_login() -> httpx.AsyncClient:
+    """Authenticate against the CherryPy web UI and return a cookie-bearing
+    client. Config settings are only writable via the web ``configUpdate``
+    endpoint (session-cookie auth), not the ``?cmd=`` API, so this is required
+    for ``mylar_set_config``. Uses MYLAR_URL + MYLAR_WEB_USERNAME +
+    MYLAR_WEB_PASSWORD."""
+    global _web_client
+    if _web_client is not None:
+        return _web_client
+    if _WEB_USERNAME is None or _WEB_PASSWORD is None:
+        raise ToolError(
+            "MYLAR_WEB_USERNAME and MYLAR_WEB_PASSWORD are required for config "
+            "changes (configUpdate uses session auth, not the API key)"
+        )
+    base = os.environ.get("MYLAR_URL", "")
+    root = _HTTP_ROOT if _HTTP_ROOT.startswith("/") else f"/{_HTTP_ROOT}"
+    client = httpx.AsyncClient(
+        base_url=f"{base.rstrip('/')}{root}",
+        follow_redirects=True,
+        transport=_web_transport,
+    )
+    r = await client.post(
+        "/auth/login",
+        data={
+            "current_username": _WEB_USERNAME,
+            "current_password": _WEB_PASSWORD,
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    if r.status_code >= 400:
+        raise ToolError(f"Mylar web login failed: HTTP {r.status_code}")
+    _web_client = client
+    return client
+
+
+async def _web_config_update(values: dict[str, Any]) -> dict[str, Any]:
+    """POST settings to the web configUpdate endpoint using a session cookie."""
+    client = await _web_login()
+    r = await client.post(
+        "/configUpdate",
+        data=values,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    if r.status_code >= 400:
+        raise ToolError(f"Mylar configUpdate failed: HTTP {r.status_code}")
+    return {"message": "config updated", "status": r.status_code}
+
 
 
 # --- read-only tools ---------------------------------------------------------
@@ -455,7 +508,27 @@ async def mylar_clear_logs() -> JSONObj:
     return await _req("clearLogs", read_only=False)
 
 
-# --- destructive tools -------------------------------------------------------
+# --- config / destructive tools ---------------------------------------------
+
+
+@mcp.tool
+async def mylar_set_config(settings: dict[str, Any]) -> JSONObj:
+    """Set one or more Mylar config options via the web configUpdate endpoint.
+
+    Takes a dict of checkbox/text settings keyed by their config.ini name
+    (e.g. {"notify_pack_gif": True}). Checkboxes use boolean values; unchecked
+    checkboxes should be set to False. Requires MYLAR_WEB_USERNAME and
+    MYLAR_WEB_PASSWORD. Applies immediately and persists to config.ini.
+    """
+    values: dict[str, Any] = {}
+    for k, v in settings.items():
+        if isinstance(v, bool):
+            values[k] = "True" if v else "False"
+        elif v is None:
+            values[k] = "False"
+        else:
+            values[k] = str(v)
+    return await _web_config_update(values)
 
 
 @mcp.tool(annotations=DESTRUCTIVE)
@@ -486,13 +559,15 @@ async def mylar_shutdown() -> JSONObj:
 
 
 def main() -> None:
-    global _client, _API_KEY, _HTTP_ROOT
+    global _client, _API_KEY, _HTTP_ROOT, _WEB_USERNAME, _WEB_PASSWORD
     url = os.environ.get("MYLAR_URL")
     if not url:
         print("MYLAR_URL environment variable is required (e.g. http://mylar.local:8090)", file=sys.stderr)
         raise SystemExit(1)
     _API_KEY = os.environ.get("MYLAR_API_KEY")
     _HTTP_ROOT = os.environ.get("MYLAR_HTTP_ROOT", "/")
+    _WEB_USERNAME = os.environ.get("MYLAR_WEB_USERNAME")
+    _WEB_PASSWORD = os.environ.get("MYLAR_WEB_PASSWORD")
     _client = build_client(url, _API_KEY, _HTTP_ROOT)
     mcp.run()
 

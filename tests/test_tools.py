@@ -376,3 +376,54 @@ def test_main_requires_mylar_url(monkeypatch):
     monkeypatch.delenv("MYLAR_URL", raising=False)
     with pytest.raises(SystemExit):
         mylar_mcp.main()
+
+
+class WebRecorder:
+    """Captures the login + configUpdate request sequence."""
+
+    def __init__(self):
+        self.calls = []
+        self.login_response = httpx.Response(
+            303, headers={"Location": "/home/"}, request=httpx.Request("POST", "/auth/login")
+        )
+        self.config_response = httpx.Response(200, json={"message": "config updated"})
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.calls.append((request.method, str(request.url), request.content))
+        if request.url.path.endswith("/auth/login"):
+            return self.login_response
+        return self.config_response
+
+
+@pytest.mark.asyncio
+async def test_mylar_set_config_web_auth_and_update(monkeypatch):
+    """mylar_set_config must log in via /auth/login then POST /configUpdate with
+    boolean settings converted to True/False strings."""
+    rec = WebRecorder()
+    transport = httpx.MockTransport(rec.handler)
+    monkeypatch.setattr(mylar_mcp, "_HTTP_ROOT", "/")
+    monkeypatch.setattr(mylar_mcp, "_WEB_USERNAME", "u")
+    monkeypatch.setattr(mylar_mcp, "_WEB_PASSWORD", "p")
+    monkeypatch.setattr(mylar_mcp, "_web_client", None)
+    monkeypatch.setattr(mylar_mcp, "_web_transport", transport)
+    monkeypatch.setenv("MYLAR_URL", "http://mylar.example.com")
+
+    try:
+        result = await mylar_mcp._web_config_update({"notify_pack_gif": "True", "packs_default": "False"})
+        assert result["status"] == 200
+    finally:
+        if mylar_mcp._web_client is not None:
+            await mylar_mcp._web_client.aclose()
+        monkeypatch.setattr(mylar_mcp, "_web_client", None)
+
+    methods = [c[0] for c in rec.calls]
+    # login POST, redirect GET (followed), then configUpdate POST
+    assert methods.count("POST") == 2
+    assert rec.calls[0][0] == "POST"
+    assert rec.calls[-1][0] == "POST"
+    login_body = rec.calls[0][2].decode()
+    assert "current_username=u" in login_body
+    assert "current_password=p" in login_body
+    config_body = rec.calls[-1][2].decode()
+    assert "notify_pack_gif=True" in config_body
+    assert "packs_default=False" in config_body
