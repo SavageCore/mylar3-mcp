@@ -334,6 +334,50 @@ async def test_raw_payload_returned_without_envelope(server, recorder):
     assert result.data == [{"id": "123", "name": "Batman"}]
 
 
+async def test_get_comic_unwraps_single_element_list(server, recorder):
+    recorder.response = httpx.Response(200, json=[{"id": "123", "name": "Batman", "status": "Active"}])
+    result = await call(server, "mylar_get_comic", id="123")
+    assert isinstance(result.data, dict)
+    assert result.data == {"id": "123", "name": "Batman", "status": "Active"}
+
+
+async def test_get_comic_info_unwraps_single_element_list(server, recorder):
+    recorder.response = httpx.Response(
+        200,
+        json=[{
+            "id": "18167",
+            "name": "Preacher: Tall in the Saddle",
+            "imageURL": "https://comicvine.gamespot.com/a/uploads/scale_large/6/67663/2033031-01.jpg",
+            "status": "Active",
+            "publisher": "DC Comics",
+            "publishYear": "December 2000",
+            "year": "2000",
+            "latestIssue": "1",
+            "totalIssues": 1,
+            "detailsURL": "https://comicvine.gamespot.com/preacher-tall-in-the-saddle/4050-18167/",
+            "alternateSearch": None,
+        }],
+    )
+    result = await call(server, "mylar_get_comic_info", id="18167")
+    assert isinstance(result.data, dict)
+    assert result.data["id"] == "18167"
+    assert result.data["name"] == "Preacher: Tall in the Saddle"
+
+
+async def test_get_issue_info_unwraps_single_element_list(server, recorder):
+    recorder.response = httpx.Response(200, json=[{"id": "456", "issue": "1", "comicid": "123"}])
+    result = await call(server, "mylar_get_issue_info", id="456")
+    assert isinstance(result.data, dict)
+    assert result.data == {"id": "456", "issue": "1", "comicid": "123"}
+
+
+async def test_get_comic_info_wraps_multi_element_list(server, recorder):
+    recorder.response = httpx.Response(200, json=[{"id": "1"}, {"id": "2"}])
+    result = await call(server, "mylar_get_comic_info", id="1")
+    assert isinstance(result.data, dict)
+    assert result.data == {"data": [{"id": "1"}, {"id": "2"}]}
+
+
 async def test_bare_ok_string_returned(server, recorder):
     recorder.response = httpx.Response(200, json="OK")
     result = await call(server, "mylar_pause_comic", id="123")

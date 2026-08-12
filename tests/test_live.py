@@ -69,8 +69,8 @@ async def test_pause_resume_roundtrip():
     await call("mylar_pause_comic", id=comic_id)
     try:
         info = await call("mylar_get_comic_info", id=comic_id)
-        assert info.data["Status"] == "Paused"
+        assert info.data["status"] == "Paused"
     finally:
         await call("mylar_resume_comic", id=comic_id)
     info = await call("mylar_get_comic_info", id=comic_id)
-    assert info.data["Status"] == "Active"
+    assert info.data["status"] == "Active"

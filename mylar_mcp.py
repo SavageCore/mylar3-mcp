@@ -88,6 +88,20 @@ def _unwrap(r: httpx.Response) -> Any:
     return j
 
 
+def _obj(value: Any) -> JSONObj:
+    """Normalise a Mylar payload into a dict for FastMCP's structured content.
+
+    FastMCP requires structured content to be a dict, but some single-entity
+    Mylar endpoints (getComic, getComicInfo, getIssueInfo) answer with a
+    one-element list. Unwrap that to the bare dict; wrap anything else.
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], dict):
+        return value[0]
+    return {"data": value}
+
+
 async def _req(cmd: str, params: dict[str, Any] | None = None, *, read_only: bool = True) -> Any:
     assert _client is not None, "client not configured"
     body = {"cmd": cmd, **(params or {})}
@@ -175,19 +189,19 @@ async def mylar_get_index() -> JSONVal:
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_get_comic(id: str) -> JSONObj:
     """Get one series and its issues: returns {comic, issues, annuals}. `id` is the ComicVine ComicID."""
-    return await _req("getComic", {"id": id})
+    return _obj(await _req("getComic", {"id": id}))
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_get_comic_info(id: str) -> JSONObj:
     """Get a single series row from the comics table. `id` is the ComicVine ComicID."""
-    return await _req("getComicInfo", {"id": id})
+    return _obj(await _req("getComicInfo", {"id": id}))
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def mylar_get_issue_info(id: str) -> JSONObj:
     """Get a single issue row from the issues table. `id` is the IssueID."""
-    return await _req("getIssueInfo", {"id": id})
+    return _obj(await _req("getIssueInfo", {"id": id}))
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
