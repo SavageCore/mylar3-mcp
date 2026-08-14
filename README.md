@@ -1,6 +1,6 @@
 # mylar3-mcp
 
-Part of the [arr-mcps](https://github.com/SavageCore/arr-mcps) collection.
+Part of the [arr-mcps](https://github.com/arr-mcps/arr-mcps) collection.
 MCP server exposing [Mylar3](https://github.com/MylarComics/mylar3)'s HTTP API
 as tools, so an LLM can read and manage your comic library: watchlist, wanted
 issues, pull-list/upcoming, history, logs, story arcs, and providers.
@@ -17,7 +17,7 @@ Mylar3, and out of scope for this project - see Mylar3's own settings for
 
 ## Install
 
-Download a wheel from the [latest release](https://github.com/SavageCore/mylar3-mcp/releases/latest)
+Download a wheel from the [latest release](https://github.com/arr-mcps/mylar3-mcp/releases/latest)
 and install it as a `uv` tool (no repo checkout needed):
 
 ```bash
@@ -149,7 +149,7 @@ make help  # list all commands
 | `make clean` | Remove build artifacts |
 
 The release workflow (`.github/workflows/release.yml`) builds and publishes to
-[Releases](https://github.com/SavageCore/mylar3-mcp/releases) whenever a `v*` tag
+[Releases](https://github.com/arr-mcps/mylar3-mcp/releases) whenever a `v*` tag
 is pushed - so the usual flow is `make bump-patch`, commit, then tag and push.
 
 The integration suite only reads data, plus a single reversible write test that
